@@ -183,7 +183,7 @@ c1, c2 = st.columns(2)
 with c1:
     # Boxplot (plotly)
     figb = go.Figure()
-    figb.add_trace(go.Box(y=daily_f["Outflow"], name="Daily Outflow", boxpoints="outliers"))
+    figb.add_trace(go.Box(x=daily_f["Outflow"], name="Daily Outflow", boxpoints="outliers"))
     figb.update_layout(height=360, yaxis_title="Outflow Quantity")
     st.plotly_chart(figb, use_container_width=True)
 
