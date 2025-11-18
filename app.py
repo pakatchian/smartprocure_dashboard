@@ -5,11 +5,11 @@ import plotly.express as px
 
 # -------------------- Config --------------------
 st.set_page_config(
-    page_title="Inventory NSM & Seasonality Dashboard",
+    page_title="Inventory NSM & Time-based Analysis",
     layout="wide"
 )
 
-st.title("Inventory NSM & Time-based Analysis")
+st.title("Inventory NSM & Time-based Analysis (Shamsi Calendar)")
 st.caption("Data source: 992800103_withPartNumber.csv")
 
 DATA_PATH_DEFAULT = "data/992800103_withPartNumber.csv"  # مسیر را مطابق پروژه خودت تنظیم کن
@@ -43,11 +43,13 @@ else:
 # -------------------- Required Columns Check --------------------
 required_cols = [
     "Transaction Qty",
-    "Date Applied (Year)",
-    "Quarter Number",
     "On Hand Qty After Transaction",
+    "Date Applied (Year)",
+    "Date Applied (Month)",
+    "Date Applied (Day)",
     "Date Applied (Shamsi)",
     "Date Applied (Miladi)",
+    "Quarter Number",
 ]
 missing = [c for c in required_cols if c not in df.columns]
 
@@ -90,6 +92,17 @@ df_f["IssueVolume"] = np.where(df_f["IsIssue"], -df_f["Transaction Qty"], 0.0)
 
 # Stockout definition: Issue + موجودی بعد از تراکنش ≤ 0
 df_f["IsStockoutEvent"] = (df_f["IsIssue"]) & (df_f["On Hand Qty After Transaction"] <= 0)
+
+# Shamsi months in English (fixed order)
+shamsi_months_en = [
+    "Farvardin", "Ordibehesht", "Khordad",
+    "Tir", "Mordad", "Shahrivar",
+    "Mehr", "Aban", "Azar",
+    "Dey", "Bahman", "Esfand"
+]
+month_map = {i + 1: name for i, name in enumerate(shamsi_months_en)}
+
+df_f["MonthEN"] = df_f["Date Applied (Month)"].map(month_map)
 
 # -------------------- KPI Computation --------------------
 total_issue_txn = df_f["IsIssue"].sum()
@@ -137,9 +150,9 @@ with c3:
 st.markdown("---")
 
 # -------------------- Tabs --------------------
-tab1, tab2 = st.tabs(["📊 Quarterly Seasonality", "⚠️ Daily Outliers (IQR)"])
+tab1, tab2 = st.tabs(["📊 Quarterly & Monthly Seasonality", "⚠️ Daily Outliers (IQR)"])
 
-# ==================== TAB 1: Quarterly Seasonality ====================
+# ==================== TAB 1: Quarterly & Monthly Seasonality ====================
 with tab1:
     st.subheader("Quarterly Seasonality of Issue & Receive")
 
@@ -184,35 +197,114 @@ with tab1:
         with st.expander("Show aggregated quarterly data"):
             st.dataframe(quarter_agg, use_container_width=True)
 
+    st.subheader("Monthly Issue Trend (Shamsi Months, English Labels)")
+
+    # ---------------- Monthly aggregation ----------------
+    monthly_issue = (
+        df_f[df_f["IsIssue"]]
+        .groupby(["Date Applied (Year)", "Date Applied (Month)"], as_index=False)
+        .agg(MonthlyIssue=("IssueVolume", "sum"))
+    )
+
+    if monthly_issue.empty:
+        st.info("No monthly issue data available.")
+    else:
+        monthly_issue["MonthEN"] = monthly_issue["Date Applied (Month)"].map(month_map)
+
+        # Build label: e.g. "Tir 1403"
+        monthly_issue["MonthYearLabel"] = (
+            monthly_issue["MonthEN"] + " " +
+            monthly_issue["Date Applied (Year)"].astype(int).astype(str)
+        )
+
+        # Sort by Year then Month index
+        monthly_issue = monthly_issue.sort_values(
+            ["Date Applied (Year)", "Date Applied (Month)"]
+        ).reset_index(drop=True)
+
+        # Make label categorical in correct order to avoid any date parsing
+        ordered_labels = monthly_issue["MonthYearLabel"].tolist()
+        monthly_issue["MonthYearLabel"] = pd.Categorical(
+            monthly_issue["MonthYearLabel"],
+            categories=ordered_labels,
+            ordered=True
+        )
+
+        fig_m = px.line(
+            monthly_issue,
+            x="MonthYearLabel",
+            y="MonthlyIssue",
+            markers=True,
+            color="Date Applied (Year)",
+            title="Monthly Issue Volume (Shamsi Month-Year Labels)",
+            labels={
+                "MonthYearLabel": "Month-Year (Shamsi)",
+                "MonthlyIssue": "Total Issue Volume",
+                "Date Applied (Year)": "Year"
+            }
+        )
+
+        fig_m.update_layout(
+            template="plotly_white",
+            title_x=0.5,
+            font=dict(size=11),
+            xaxis_tickangle=-45,
+            height=450
+        )
+
+        st.plotly_chart(fig_m, use_container_width=True)
+
+        with st.expander("Show monthly issue data"):
+            st.dataframe(monthly_issue, use_container_width=True)
+
 # ==================== TAB 2: Daily Outliers (IQR) ====================
 with tab2:
     st.subheader("Daily Issue Outliers (IQR-based, Shamsi Calendar)")
 
-    # Parse Miladi date only for sorting
+    # DateMiladi only for internal sorting
     df_f["DateMiladi"] = pd.to_datetime(df_f["Date Applied (Miladi)"])
 
-    # Build daily Issue: group by Shamsi + Miladi
+    # Build daily issue grouped by Shamsi date + components
     daily_issue = (
         df_f[df_f["IsIssue"]]
-        .groupby(["Date Applied (Shamsi)", "DateMiladi"], as_index=False)
+        .groupby(
+            [
+                "Date Applied (Shamsi)",
+                "DateMiladi",
+                "Date Applied (Year)",
+                "Date Applied (Month)",
+                "Date Applied (Day)"
+            ],
+            as_index=False
+        )
         .agg(DailyIssue=("IssueVolume", "sum"))
     )
 
     if daily_issue.empty:
         st.info("No issue data available to calculate daily outliers.")
     else:
-        # Sort by Miladi internally
         daily_issue = daily_issue.sort_values("DateMiladi").reset_index(drop=True)
 
-        # Build categorical Shamsi label to prevent Gregorian interpretation
-        daily_issue["ShamsiLabel"] = daily_issue["Date Applied (Shamsi)"].astype(str)
-        daily_issue["ShamsiLabel"] = pd.Categorical(
-            daily_issue["ShamsiLabel"],
-            categories=daily_issue["ShamsiLabel"].tolist(),
+        # Map month to English name
+        daily_issue["MonthEN"] = daily_issue["Date Applied (Month)"].map(month_map)
+
+        # Pretty label: e.g. "Tir 02 1403"
+        daily_issue["PrettyShamsi"] = (
+            daily_issue["MonthEN"] + " " +
+            daily_issue["Date Applied (Day)"].astype(int).astype(str).str.zfill(2) +
+            " " +
+            daily_issue["Date Applied (Year)"].astype(int).astype(str)
+        )
+
+        # Ensure axis is categorical in the correct time order
+        ordered_daily_labels = daily_issue["PrettyShamsi"].tolist()
+        daily_issue["PrettyShamsi"] = pd.Categorical(
+            daily_issue["PrettyShamsi"],
+            categories=ordered_daily_labels,
             ordered=True
         )
 
-        # IQR calculation
+        # IQR
         Q1 = daily_issue["DailyIssue"].quantile(0.25)
         Q3 = daily_issue["DailyIssue"].quantile(0.75)
         IQR = Q3 - Q1
@@ -252,22 +344,22 @@ with tab2:
         )
         st.plotly_chart(fig_box, use_container_width=True)
 
-        # Line chart with Shamsi labels + outliers
+        # Line chart with PrettyShamsi labels
         fig_line = px.line(
             daily_issue,
-            x="ShamsiLabel",
+            x="PrettyShamsi",
             y="DailyIssue",
             markers=True,
-            title="Daily Issue Trend with IQR Outliers (Shamsi Dates)",
+            title="Daily Issue Trend with IQR Outliers (Shamsi, English Month Names)",
             labels={
-                "ShamsiLabel": "Date (Shamsi)",
+                "PrettyShamsi": "Date (Shamsi)",
                 "DailyIssue": "Daily Issue Volume"
             }
         )
 
         if not outliers.empty:
             fig_line.add_scatter(
-                x=outliers["ShamsiLabel"],
+                x=outliers["PrettyShamsi"],
                 y=outliers["DailyIssue"],
                 mode="markers",
                 name="Outliers",
@@ -291,6 +383,7 @@ with tab2:
 
         with st.expander("Show daily issue data (with outlier flags)"):
             st.dataframe(daily_issue, use_container_width=True)
+
 
 
 # ==========================================================
