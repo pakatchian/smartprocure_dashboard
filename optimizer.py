@@ -22,8 +22,9 @@ class Config:
     TRANSACTIONS_FILE = "data/data_transactions.csv-test"
     LEAD_TIMES_FILE = "data/data_lead_times.csv"
 
-    cwd = os.getcwd()
-    st.write("📁 Current working directory:", cwd)
+    target_folder = os.path.join(cwd, "data")
+
+    st.write("📁 Current working directory:", target_folder)
     
     # List files in the current directory
     files = os.listdir(cwd)
