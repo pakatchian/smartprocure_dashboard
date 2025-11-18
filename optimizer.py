@@ -16,8 +16,8 @@ import ruptures as rpt
 # =============================================================================
 class Config:
     """System configuration parameters"""
-    TRANSACTIONS_FILE = "data\data_transactions.csv"
-    LEAD_TIMES_FILE = "data\data_lead_times.csv"
+    TRANSACTIONS_FILE = "data\\data_transactions.csv"
+    LEAD_TIMES_FILE = "data\\data_lead_times.csv"
     TRAIN_TEST_SPLIT = 0.8
     RANDOM_SEED = 42
 
