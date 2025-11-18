@@ -28,7 +28,7 @@ class Config:
     st.write("📁 Current working directory:", target_folder)
     
     # List files in the current directory
-    files = os.listdir(cwd)
+    files = os.listdir(target_folder)
     st.write("📄 Files in this directory:")
     for file in files:
         st.write("- ", file)
