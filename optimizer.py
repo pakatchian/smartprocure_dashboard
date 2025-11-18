@@ -21,14 +21,6 @@ class Config:
     """System configuration parameters"""
     cwd = os.getcwd()
     target_folder = os.path.join(cwd, "data")
-
-    st.write("📁 Current working directory:", target_folder)
-    
-    # List files in the current directory
-    files = os.listdir(target_folder)
-    st.write("📄 Files in this directory:")
-    for file in files:
-        st.write("- ", file)
     
     TRANSACTIONS_FILE = os.path.join(cwd, "data/data_transactions.xlsx")
     LEAD_TIMES_FILE = os.path.join(cwd, "data/data_lead_times.xlsx")
