@@ -19,9 +19,6 @@ import streamlit as st
 # =============================================================================
 class Config:
     """System configuration parameters"""
-    TRANSACTIONS_FILE = os.path.join(cwd, "data/data_transactions.csv-test")
-    LEAD_TIMES_FILE = os.path.join(cwd, "data/data_lead_times.csv")
-
     cwd = os.getcwd()
     target_folder = os.path.join(cwd, "data")
 
@@ -32,7 +29,9 @@ class Config:
     st.write("📄 Files in this directory:")
     for file in files:
         st.write("- ", file)
-
+    
+    TRANSACTIONS_FILE = os.path.join(cwd, "data/data_transactions.csv-test")
+    LEAD_TIMES_FILE = os.path.join(cwd, "data/data_lead_times.csv")
     
     TRAIN_TEST_SPLIT = 0.8
     RANDOM_SEED = 42
