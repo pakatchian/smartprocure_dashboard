@@ -151,7 +151,11 @@ with c3:
 st.markdown("---")
 
 # -------------------- Tabs --------------------
-tab1, tab2 = st.tabs(["📊 Quarterly / Monthly / Heatmap", "⚠️ Daily Outliers (IQR)"])
+tab1, tab2, tab3 = st.tabs([
+    "📊 Quarterly / Monthly / Heatmap",
+    "⚠️ Daily Outliers (IQR)",
+    "♟ Decisions (R & Q Optimization)"
+])
 
 # ==================== TAB 1: Quarterly & Monthly Seasonality + Heatmap ====================
 with tab1:
@@ -448,134 +452,163 @@ with tab2:
         with st.expander("Show daily issue data (with outlier flags)"):
             st.dataframe(daily_issue, use_container_width=True)
 
+# ==================== TAB 3: Decisions (R & Q Optimization) ====================
+with tab3:
+    st.subheader("6) Decisions (Next Phase) – R & Q Optimization")
 
-# ==========================================================
-# 6) Decisions (R & Q) – Placeholder for next phase
-# ==========================================================
-st.header("6) Decisions (Next Phase)")
-
-# Try to run optimizer and display results
-try:
-    from optimizer import (
-        Config, DataLoader, ChangePointDetector, FeatureEngineer,
-        InventorySimulator, PolicyOptimizer, LeadTimeEstimator
-    )
-    import matplotlib.pyplot as plt
-    
-    config = Config()
-    shelf_life_days = 90
-    
-    # Load and process data for optimization
-    daily_opt, dates_opt = DataLoader.load_and_prepare(config.TRANSACTIONS_FILE)
-    
-    # Change point detection
-    detector = ChangePointDetector(
-        penalty=config.CHANGE_POINT_PENALTY,
-        min_size=config.CHANGE_POINT_MIN_SIZE
-    )
-    detector.detect(daily_opt["usage_qty"])
-    periods = detector.classify_periods(
-        daily_opt["usage_qty"],
-        dates_opt,
-        config.HIGH_DEMAND_THRESHOLD,
-        config.LOW_DEMAND_THRESHOLD
-    )
-    
-    # Feature engineering
-    daily_opt = FeatureEngineer.create_base_features(daily_opt, dates_opt)
-    overall_mean = daily_opt["usage_qty"].mean()
-    daily_opt = FeatureEngineer.create_period_features(daily_opt, periods, overall_mean)
-    daily_opt = FeatureEngineer.create_proximity_features(daily_opt, periods, config)
-    
-    feature_columns = [
-        "dayofweek", "month", "lag1", "rolling_mean_7", "rolling_mean_30",
-        "period_type_high", "period_type_low", "period_mean_demand",
-        "days_to_high_demand", "days_from_high_demand",
-        "near_high_demand", "near_low_demand"
-    ]
-    X = daily_opt[feature_columns]
-    y = daily_opt["inventory"]
-    
-    # Train model
-    from sklearn.pipeline import make_pipeline
-    from sklearn.impute import SimpleImputer
-    from sklearn.linear_model import LinearRegression
-    
-    model = make_pipeline(SimpleImputer(strategy="mean"), LinearRegression())
-    model.fit(X, y)
-    pred_inventory = model.predict(X)
-    pred_usage = np.maximum(0, np.concatenate(([0], -np.diff(pred_inventory))))
-    
-    # Lead time function
-    lead_time_func = lambda current_date, idx: 2
     try:
-        lead_est = LeadTimeEstimator(config)
-        lead_est.train(config.LEAD_TIMES_FILE)
-        lead_time_func = lambda current_date, idx: lead_est.predict(current_date)
-    except:
-        pass
-    
-    # Optimization
-    simulator = InventorySimulator(config, shelf_life_days)
-    optimizer = PolicyOptimizer(simulator, config)
-    results_df = optimizer.grid_search(
-        pred_usage,
-        daily_opt["inventory"].iloc[0],
-        dates_opt,
-        lead_time_func=lead_time_func
-    )
-    best = results_df.iloc[0]
-    
-    # Simulate with best policy
-    _, _, _, simulated_inv = simulator.simulate(
-        pred_usage,
-        daily_opt["inventory"].iloc[0],
-        dates_opt,
-        best.R,
-        best.Q,
-        lead_time_func=lead_time_func,
-        track_inventory=True
-    )
-    
-    # Create matplotlib figure and convert to Streamlit
-    fig, ax = plt.subplots(figsize=(15, 6))
-    ax.plot(dates_opt, daily_opt["inventory"].values, label="Actual Inventory", alpha=0.7, linewidth=2)
-    ax.plot(dates_opt, simulated_inv, label="Simulated Optimal Policy", alpha=0.7, linewidth=2)
-    ax.axhline(best.R, color="r", linestyle="--", alpha=0.5, label=f"Reorder Point R={best.R:,.0f}")
-    
-    for cp_idx in detector.change_points[:-1]:
-        ax.axvline(dates_opt[cp_idx], color="orange", linestyle=":", alpha=0.5, linewidth=1)
-    
-    for period in periods:
-        if period["period_type"] == "HIGH_DEMAND":
-            ax.axvspan(period["start_date"], period["end_date"], alpha=0.15, color="red")
-        elif period["period_type"] == "LOW_DEMAND":
-            ax.axvspan(period["start_date"], period["end_date"], alpha=0.15, color="blue")
-    
-    ax.set_title("Optimal Policy vs Historical Inventory (with Change Point Detection)", fontsize=12, fontweight='bold')
-    ax.set_ylabel("Inventory Level")
-    ax.set_xlabel("Date")
-    ax.legend(loc='best')
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    
-    st.pyplot(fig)
-    
-    st.success(f"✓ Optimal Policy Found: **R={best.R:,.0f}, Q={best.Q:,.0f}**")
-    st.metric("Waste", f"{best.waste:,.1f}")
-    st.metric("Stockouts", f"{best.stockouts:,.1f}")
-    st.metric("Service Level", f"{best.service_level:.1%}")
-    
-except Exception as e:
-    st.info(
-        "این بخش در فاز بعدی تکمیل می‌شود: محاسبه R و Q بر اساس LT، سطح خدمت هدف، نوسان تقاضا، و سناریوهای What-If. "
-        "خروجی این بخش جدول سفارش پیشنهادی و اثر آن بر Coverage/ERI خواهد بود."
-    )
-    st.warning(f"Optimizer not available: {str(e)}")
+        from optimizer import (
+            Config, DataLoader, ChangePointDetector, FeatureEngineer,
+            InventorySimulator, PolicyOptimizer, LeadTimeEstimator
+        )
+        import matplotlib.pyplot as plt
 
-# Tables (download)
-st.subheader("Data Snapshots")
-st.download_button("Download filtered daily (CSV)", daily_f.to_csv(index=False).encode("utf-8"),
-                   file_name="daily_filtered.csv")
-st.download_button("Download monthly (CSV)", monthly.to_csv(index=False).encode("utf-8"),
-                   file_name="monthly.csv")
+        config = Config()
+        shelf_life_days = 90
+
+        # Load and process data for optimization
+        daily_opt, dates_opt = DataLoader.load_and_prepare(config.TRANSACTIONS_FILE)
+
+        # Change point detection
+        detector = ChangePointDetector(
+            penalty=config.CHANGE_POINT_PENALTY,
+            min_size=config.CHANGE_POINT_MIN_SIZE
+        )
+        detector.detect(daily_opt["usage_qty"])
+        periods = detector.classify_periods(
+            daily_opt["usage_qty"],
+            dates_opt,
+            config.HIGH_DEMAND_THRESHOLD,
+            config.LOW_DEMAND_THRESHOLD
+        )
+
+        # Feature engineering
+        daily_opt = FeatureEngineer.create_base_features(daily_opt, dates_opt)
+        overall_mean = daily_opt["usage_qty"].mean()
+        daily_opt = FeatureEngineer.create_period_features(daily_opt, periods, overall_mean)
+        daily_opt = FeatureEngineer.create_proximity_features(daily_opt, periods, config)
+
+        feature_columns = [
+            "dayofweek", "month", "lag1", "rolling_mean_7", "rolling_mean_30",
+            "period_type_high", "period_type_low", "period_mean_demand",
+            "days_to_high_demand", "days_from_high_demand",
+            "near_high_demand", "near_low_demand"
+        ]
+        X = daily_opt[feature_columns]
+        y = daily_opt["inventory"]
+
+        # Train model
+        from sklearn.pipeline import make_pipeline
+        from sklearn.impute import SimpleImputer
+        from sklearn.linear_model import LinearRegression
+
+        model = make_pipeline(SimpleImputer(strategy="mean"), LinearRegression())
+        model.fit(X, y)
+        pred_inventory = model.predict(X)
+        pred_usage = np.maximum(0, np.concatenate(([0], -np.diff(pred_inventory))))
+
+        # Lead time function
+        lead_time_func = lambda current_date, idx: 2
+        try:
+            lead_est = LeadTimeEstimator(config)
+            lead_est.train(config.LEAD_TIMES_FILE)
+            lead_time_func = lambda current_date, idx: lead_est.predict(current_date)
+        except Exception:
+            pass
+
+        # Optimization
+        simulator = InventorySimulator(config, shelf_life_days)
+        optimizer = PolicyOptimizer(simulator, config)
+        results_df = optimizer.grid_search(
+            pred_usage,
+            daily_opt["inventory"].iloc[0],
+            dates_opt,
+            lead_time_func=lead_time_func
+        )
+        best = results_df.iloc[0]
+
+        # Simulate with best policy
+        _, _, _, simulated_inv = simulator.simulate(
+            pred_usage,
+            daily_opt["inventory"].iloc[0],
+            dates_opt,
+            best.R,
+            best.Q,
+            lead_time_func=lead_time_func,
+            track_inventory=True
+        )
+
+        # Create matplotlib figure and show in Streamlit
+        fig, ax = plt.subplots(figsize=(15, 6))
+        ax.plot(dates_opt, daily_opt["inventory"].values, label="Actual Inventory", alpha=0.7, linewidth=2)
+        ax.plot(dates_opt, simulated_inv, label="Simulated Optimal Policy", alpha=0.7, linewidth=2)
+        ax.axhline(best.R, color="r", linestyle="--", alpha=0.5, label=f"Reorder Point R={best.R:,.0f}")
+
+        for cp_idx in detector.change_points[:-1]:
+            ax.axvline(dates_opt[cp_idx], color="orange", linestyle=":", alpha=0.5, linewidth=1)
+
+        for period in periods:
+            if period["period_type"] == "HIGH_DEMAND":
+                ax.axvspan(period["start_date"], period["end_date"], alpha=0.15, color="red")
+            elif period["period_type"] == "LOW_DEMAND":
+                ax.axvspan(period["start_date"], period["end_date"], alpha=0.15, color="blue")
+
+        ax.set_title(
+            "Optimal Policy vs Historical Inventory (with Change Point Detection)",
+            fontsize=12,
+            fontweight='bold'
+        )
+        ax.set_ylabel("Inventory Level")
+        ax.set_xlabel("Date")
+        ax.legend(loc='best')
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+
+        st.pyplot(fig)
+
+        st.success(f"✓ Optimal Policy Found: **R={best.R:,.0f}, Q={best.Q:,.0f}**")
+        c1o, c2o, c3o = st.columns(3)
+        with c1o:
+            st.metric("Waste", f"{best.waste:,.1f}")
+        with c2o:
+            st.metric("Stockouts", f"{best.stockouts:,.1f}")
+        with c3o:
+            st.metric("Service Level", f"{best.service_level:.1%}")
+
+    except Exception as e:
+        st.info(
+            "این بخش در فاز بعدی تکمیل می‌شود: محاسبه R و Q بر اساس LT، سطح خدمت هدف، نوسان تقاضا، و سناریوهای What-If. "
+            "خروجی این بخش جدول سفارش پیشنهادی و اثر آن بر Coverage/ERI خواهد بود."
+        )
+        st.warning(f"Optimizer not available: {str(e)}")
+
+    # Tables (download)
+    st.subheader("Data Snapshots")
+
+    # daily_f: یک نمای ساده از مصرف روزانه (بر اساس همین df_f)
+    daily_f = (
+        df_f[df_f["IsIssue"]]
+        .groupby(
+            ["Date Applied (Shamsi)", "Date Applied (Year)", "Date Applied (Month)", "Date Applied (Day)"],
+            as_index=False
+        )
+        .agg(IssueVolume=("IssueVolume", "sum"))
+    )
+
+    # monthly: همان تجمیع ماهانه Issue
+    monthly = (
+        df_f[df_f["IsIssue"]]
+        .groupby(["Date Applied (Year)", "Date Applied (Month)"], as_index=False)
+        .agg(IssueVolume=("IssueVolume", "sum"))
+    )
+
+    st.download_button(
+        "Download filtered daily (CSV)",
+        daily_f.to_csv(index=False).encode("utf-8"),
+        file_name="daily_filtered.csv"
+    )
+    st.download_button(
+        "Download monthly (CSV)",
+        monthly.to_csv(index=False).encode("utf-8"),
+        file_name="monthly.csv"
+    )
