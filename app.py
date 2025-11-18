@@ -50,6 +50,7 @@ required_cols = [
     "Date Applied (Shamsi)",
     "Date Applied (Miladi)",
     "Quarter Number",
+    "Day of week",
 ]
 missing = [c for c in required_cols if c not in df.columns]
 
@@ -150,9 +151,9 @@ with c3:
 st.markdown("---")
 
 # -------------------- Tabs --------------------
-tab1, tab2 = st.tabs(["📊 Quarterly & Monthly Seasonality", "⚠️ Daily Outliers (IQR)"])
+tab1, tab2 = st.tabs(["📊 Quarterly / Monthly / Heatmap", "⚠️ Daily Outliers (IQR)"])
 
-# ==================== TAB 1: Quarterly & Monthly Seasonality ====================
+# ==================== TAB 1: Quarterly & Monthly Seasonality + Heatmap ====================
 with tab1:
     st.subheader("Quarterly Seasonality of Issue & Receive")
 
@@ -197,51 +198,64 @@ with tab1:
         with st.expander("Show aggregated quarterly data"):
             st.dataframe(quarter_agg, use_container_width=True)
 
-    st.subheader("Monthly Issue Trend (Shamsi Months, English Labels)")
+    # ------------ Monthly Issue Trend + MA3 ------------
+    st.subheader("Monthly Issue Trend (Shamsi Months, English Labels) with MA3")
 
-    # ---------------- Monthly aggregation ----------------
     monthly_issue = (
         df_f[df_f["IsIssue"]]
-        .groupby(["Date Applied (Year)", "Date Applied (Month)"], as_index=False)
+        .groupby(["Date Applied (Year)", "Date Applied (Month)", "MonthEN"], as_index=False)
         .agg(MonthlyIssue=("IssueVolume", "sum"))
+        .rename(columns={
+            "Date Applied (Year)": "Year",
+            "Date Applied (Month)": "Month"
+        })
     )
 
     if monthly_issue.empty:
         st.info("No monthly issue data available.")
     else:
-        monthly_issue["MonthEN"] = monthly_issue["Date Applied (Month)"].map(month_map)
+        # Sort chronologically
+        monthly_issue = monthly_issue.sort_values(["Year", "Month"]).reset_index(drop=True)
 
-        # Build label: e.g. "Tir 1403"
-        monthly_issue["MonthYearLabel"] = (
-            monthly_issue["MonthEN"] + " " +
-            monthly_issue["Date Applied (Year)"].astype(int).astype(str)
+        # Label like: 1402-Farvardin
+        monthly_issue["YearMonthShamsi"] = (
+            monthly_issue["Year"].astype(int).astype(str)
+            + "-"
+            + monthly_issue["MonthEN"]
         )
 
-        # Sort by Year then Month index
-        monthly_issue = monthly_issue.sort_values(
-            ["Date Applied (Year)", "Date Applied (Month)"]
-        ).reset_index(drop=True)
+        # 3-month moving average
+        monthly_issue["MA3"] = monthly_issue["MonthlyIssue"].rolling(window=3, min_periods=1).mean()
 
-        # Make label categorical in correct order to avoid any date parsing
-        ordered_labels = monthly_issue["MonthYearLabel"].tolist()
-        monthly_issue["MonthYearLabel"] = pd.Categorical(
-            monthly_issue["MonthYearLabel"],
+        # Keep categorical order to avoid date parsing
+        ordered_labels = monthly_issue["YearMonthShamsi"].tolist()
+        monthly_issue["YearMonthShamsi"] = pd.Categorical(
+            monthly_issue["YearMonthShamsi"],
             categories=ordered_labels,
             ordered=True
         )
 
         fig_m = px.line(
             monthly_issue,
-            x="MonthYearLabel",
+            x="YearMonthShamsi",
             y="MonthlyIssue",
+            color="Year",
             markers=True,
-            color="Date Applied (Year)",
-            title="Monthly Issue Volume (Shamsi Month-Year Labels)",
+            title="Monthly Issue Volume (Shamsi Month-Year) + MA3",
             labels={
-                "MonthYearLabel": "Month-Year (Shamsi)",
+                "YearMonthShamsi": "Year-Month (Shamsi)",
                 "MonthlyIssue": "Total Issue Volume",
-                "Date Applied (Year)": "Year"
+                "Year": "Year"
             }
+        )
+
+        # Add MA3 line (black dashed)
+        fig_m.add_scatter(
+            x=monthly_issue["YearMonthShamsi"],
+            y=monthly_issue["MA3"],
+            mode="lines",
+            name="MA3 (Moving Average)",
+            line=dict(color="black", width=2, dash="dash")
         )
 
         fig_m.update_layout(
@@ -256,6 +270,56 @@ with tab1:
 
         with st.expander("Show monthly issue data"):
             st.dataframe(monthly_issue, use_container_width=True)
+
+    # ------------ Heatmap Month × Day of Week ------------
+    st.subheader("Issue Volume Heatmap – Shamsi Month × Day of Week")
+
+    heat_src = df_f[df_f["IsIssue"]].copy()
+
+    if heat_src.empty:
+        st.info("No issue data available for heatmap.")
+    else:
+        # تجمیع داده‌ها: Month × Day of week
+        heat = (
+            heat_src
+            .groupby(["Date Applied (Month)", "MonthEN", "Day of week"], as_index=False)
+            .agg(IssueVolume=("IssueVolume", "sum"))
+        )
+
+        # Pivot: سطر = MonthEN ، ستون = Day of week
+        heat_pivot = heat.pivot_table(
+            index="MonthEN",
+            columns="Day of week",
+            values="IssueVolume",
+            aggfunc="sum",
+            fill_value=0
+        )
+
+        # مرتب‌سازی سطرها و ستون‌ها
+        week_order = ["Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri"]
+        heat_pivot = heat_pivot.reindex(index=shamsi_months_en)   # Farvardin → Esfand
+        heat_pivot = heat_pivot.reindex(columns=week_order)
+
+        fig_hm = px.imshow(
+            heat_pivot,
+            labels=dict(
+                x="Day of Week",
+                y="Shamsi Month",
+                color="Total Issue Volume"
+            ),
+            x=heat_pivot.columns,
+            y=heat_pivot.index,
+            title="Issue Volume Heatmap – Shamsi Month × Day of Week"
+        )
+
+        fig_hm.update_layout(
+            template="plotly_white",
+            title_x=0.5,
+            font=dict(size=12),
+            height=500
+        )
+
+        st.plotly_chart(fig_hm, use_container_width=True)
 
 # ==================== TAB 2: Daily Outliers (IQR) ====================
 with tab2:
@@ -383,7 +447,6 @@ with tab2:
 
         with st.expander("Show daily issue data (with outlier flags)"):
             st.dataframe(daily_issue, use_container_width=True)
-
 
 
 # ==========================================================
