@@ -19,8 +19,8 @@ import streamlit as st
 # =============================================================================
 class Config:
     """System configuration parameters"""
-    TRANSACTIONS_FILE = "data/data_transactions.csv-test"
-    LEAD_TIMES_FILE = "data/data_lead_times.csv"
+    TRANSACTIONS_FILE = os.path.join(cwd, "data/data_transactions.csv-test")
+    LEAD_TIMES_FILE = os.path.join(cwd, "data/data_lead_times.csv")
 
     cwd = os.getcwd()
     target_folder = os.path.join(cwd, "data")
