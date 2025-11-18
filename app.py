@@ -9,7 +9,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("Inventory NSM & Time-based Analysis (Shamsi Calendar)")
+st.title("Inventory NSM & Time-based Analysis")
 st.caption("Data source: 992800103_withPartNumber.csv")
 
 DATA_PATH_DEFAULT = "data/992800103_withPartNumber.csv"  # مسیر را مطابق پروژه خودت تنظیم کن
