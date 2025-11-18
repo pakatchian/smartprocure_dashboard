@@ -1,48 +1,100 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px
 
-st.set_page_config(page_title="Inventory NSM & KPIs", layout="wide")
-
-DATA_PATH = "data/992800103_withPartNumber.csv"  # مسیر را مطابق پروژه خودت تنظیم کن
-
-@st.cache_data
-def load_data(path):
-    df = pd.read_csv(path)
-    # محاسبه ستون‌های کمکی
-    df["IsIssue"] = df["Transaction Qty"] < 0
-    df["IssueVolume"] = np.where(df["IsIssue"], -df["Transaction Qty"], 0.0)
-    return df
-
-df = load_data(DATA_PATH)
-
-# ---------------------------
-# 1) فیلتر بازه زمانی (اختیاری)
-# ---------------------------
-years = sorted(df["Date Applied (Year)"].dropna().unique())
-selected_years = st.sidebar.multiselect(
-    "Select Shamsi Years",
-    options=years,
-    default=years
+# -------------------- Config --------------------
+st.set_page_config(
+    page_title="Inventory NSM & Seasonality Dashboard",
+    layout="wide"
 )
+
+st.title("Inventory NSM & Time-based Analysis")
+st.caption("Data source: 992800103_withPartNumber.csv")
+
+DATA_PATH_DEFAULT = "data/992800103_withPartNumber.csv"  # مسیر را مطابق پروژه خودت تنظیم کن
+
+
+# -------------------- Load Data --------------------
+@st.cache_data
+def load_data(path_or_file):
+    return pd.read_csv(path_or_file)
+
+
+st.sidebar.header("Data Settings")
+
+data_path = st.sidebar.text_input(
+    "CSV file path",
+    value=DATA_PATH_DEFAULT,
+    help="Enter the path to 992800103_withPartNumber.csv"
+)
+
+uploaded_file = st.sidebar.file_uploader(
+    "…or upload CSV file",
+    type=["csv"],
+    help="If you upload a file, it will override the path above."
+)
+
+if uploaded_file is not None:
+    df = load_data(uploaded_file)
+else:
+    df = load_data(data_path)
+
+# -------------------- Required Columns Check --------------------
+required_cols = [
+    "Transaction Qty",
+    "Date Applied (Year)",
+    "Quarter Number",
+    "On Hand Qty After Transaction",
+    "Date Applied (Shamsi)",
+    "Date Applied (Miladi)",
+]
+missing = [c for c in required_cols if c not in df.columns]
+
+if missing:
+    st.error(f"Missing required columns in data: {missing}")
+    st.stop()
+
+# -------------------- Year Filter --------------------
+years = sorted(df["Date Applied (Year)"].dropna().unique())
+default_years = [y for y in years if 1402 <= y <= 1404] or years
+
+selected_years = st.sidebar.multiselect(
+    "Select Shamsi year(s)",
+    options=years,
+    default=default_years,
+)
+
+if not selected_years:
+    st.warning("Please select at least one year from the sidebar.")
+    st.stop()
 
 df_f = df[df["Date Applied (Year)"].isin(selected_years)].copy()
 
-# اگر دیتای فیلتر شده خالی شد
 if df_f.empty:
     st.warning("No data for selected years.")
     st.stop()
 
-# ---------------------------
-# 2) تعریف Stockout و محاسبه متریک‌ها
-# ---------------------------
-# فرض: Stockout یعنی تراکنشی که Issue بوده و موجودی بعد از تراکنش صفر یا منفی شده
+# -------------------- Common Transformations --------------------
+# FlowType & FlowQty for Issue / Receive
+df_f["FlowType"] = np.where(df_f["Transaction Qty"] < 0, "Issue", "Receive")
+df_f["FlowQty"] = np.where(
+    df_f["FlowType"] == "Issue",
+    -df_f["Transaction Qty"],
+    df_f["Transaction Qty"]
+)
+
+# Issue flags & IssueVolume
+df_f["IsIssue"] = df_f["Transaction Qty"] < 0
+df_f["IssueVolume"] = np.where(df_f["IsIssue"], -df_f["Transaction Qty"], 0.0)
+
+# Stockout definition: Issue + موجودی بعد از تراکنش ≤ 0
 df_f["IsStockoutEvent"] = (df_f["IsIssue"]) & (df_f["On Hand Qty After Transaction"] <= 0)
 
+# -------------------- KPI Computation --------------------
 total_issue_txn = df_f["IsIssue"].sum()
 stockout_events = df_f["IsStockoutEvent"].sum()
 
-# جلوگیری از تقسیم بر صفر
 if total_issue_txn > 0:
     stockout_rate = stockout_events / total_issue_txn
     sla = 1 - stockout_rate
@@ -50,7 +102,6 @@ else:
     stockout_rate = 0.0
     sla = 0.0
 
-# Inventory Turnover ≈ مجموع Issue / متوسط موجودی
 total_issue_volume = df_f.loc[df_f["IsIssue"], "IssueVolume"].sum()
 avg_inventory = df_f["On Hand Qty After Transaction"].mean()
 
@@ -59,11 +110,7 @@ if avg_inventory and avg_inventory > 0:
 else:
     inventory_turnover = 0.0
 
-# ---------------------------
-# 3) نمایش 3 کارت KPI
-# ---------------------------
-st.title("Inventory NSM & Key KPIs")
-
+# -------------------- KPI Cards --------------------
 c1, c2, c3 = st.columns(3)
 
 with c1:
@@ -83,14 +130,167 @@ with c2:
 with c3:
     st.metric(
         label="Inventory Turnover (Issue-based)",
-        value=f"{inventory_turnover:.2f}",
+        value=f"{inventory_turnover:.2f}×",
         help="Total issue volume divided by average on-hand inventory."
     )
 
-st.caption(
-    "Definitions can be refined (e.g., stockout per day or per MR), "
-    "but this version is consistent with typical inventory analytics practice."
-)
+st.markdown("---")
+
+# -------------------- Tabs --------------------
+tab1, tab2 = st.tabs(["📊 Quarterly Seasonality", "⚠️ Daily Outliers (IQR)"])
+
+# ==================== TAB 1: Quarterly Seasonality ====================
+with tab1:
+    st.subheader("Quarterly Seasonality of Issue & Receive")
+
+    quarter_agg = (
+        df_f
+        .groupby(["Date Applied (Year)", "Quarter Number", "FlowType"], as_index=False)
+        .agg({"FlowQty": "sum"})
+        .rename(columns={"Date Applied (Year)": "Year"})
+    )
+
+    if quarter_agg.empty:
+        st.info("No quarterly data available for the selected years.")
+    else:
+        fig_q = px.bar(
+            quarter_agg,
+            x="Quarter Number",
+            y="FlowQty",
+            color="FlowType",
+            facet_col="Year",
+            facet_col_wrap=3,
+            barmode="group",
+            title="Seasonality of Issue & Receive by Quarter",
+            labels={
+                "Quarter Number": "Quarter (Q1–Q4)",
+                "FlowQty": "Total Quantity",
+                "FlowType": "Flow Type",
+                "Year": "Year",
+            }
+        )
+
+        fig_q.update_layout(
+            template="plotly_white",
+            title_x=0.5,
+            legend_title_text="Flow Type",
+            font=dict(size=12),
+            height=500
+        )
+        fig_q.update_yaxes(showgrid=True)
+
+        st.plotly_chart(fig_q, use_container_width=True)
+
+        with st.expander("Show aggregated quarterly data"):
+            st.dataframe(quarter_agg, use_container_width=True)
+
+# ==================== TAB 2: Daily Outliers (IQR) ====================
+with tab2:
+    st.subheader("Daily Issue Outliers (IQR-based, Shamsi Calendar)")
+
+    # Parse Miladi date only for sorting
+    df_f["DateMiladi"] = pd.to_datetime(df_f["Date Applied (Miladi)"])
+
+    # Build daily Issue: group by Shamsi + Miladi
+    daily_issue = (
+        df_f[df_f["IsIssue"]]
+        .groupby(["Date Applied (Shamsi)", "DateMiladi"], as_index=False)
+        .agg(DailyIssue=("IssueVolume", "sum"))
+    )
+
+    if daily_issue.empty:
+        st.info("No issue data available to calculate daily outliers.")
+    else:
+        # Sort by Miladi internally
+        daily_issue = daily_issue.sort_values("DateMiladi").reset_index(drop=True)
+
+        # Build categorical Shamsi label to prevent Gregorian interpretation
+        daily_issue["ShamsiLabel"] = daily_issue["Date Applied (Shamsi)"].astype(str)
+        daily_issue["ShamsiLabel"] = pd.Categorical(
+            daily_issue["ShamsiLabel"],
+            categories=daily_issue["ShamsiLabel"].tolist(),
+            ordered=True
+        )
+
+        # IQR calculation
+        Q1 = daily_issue["DailyIssue"].quantile(0.25)
+        Q3 = daily_issue["DailyIssue"].quantile(0.75)
+        IQR = Q3 - Q1
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+
+        def classify_outlier(x):
+            if x > upper_bound:
+                return "High Outlier"
+            elif x < lower_bound:
+                return "Low Outlier"
+            else:
+                return "Normal"
+
+        daily_issue["OutlierFlag"] = daily_issue["DailyIssue"].apply(classify_outlier)
+        outliers = daily_issue[daily_issue["OutlierFlag"] != "Normal"]
+
+        c_left, c_right = st.columns(2)
+        with c_left:
+            st.write(f"Q1: `{Q1:.2f}`  |  Q3: `{Q3:.2f}`  |  IQR: `{IQR:.2f}`")
+        with c_right:
+            st.write(f"Lower Bound: `{lower_bound:.2f}`  |  Upper Bound: `{upper_bound:.2f}`")
+
+        # Horizontal Boxplot
+        fig_box = px.box(
+            daily_issue,
+            x="DailyIssue",
+            points="outliers",
+            title="Daily Issue Distribution (Horizontal Boxplot, IQR Outliers)",
+            labels={"DailyIssue": "Daily Issue Volume"}
+        )
+        fig_box.update_layout(
+            template="plotly_white",
+            title_x=0.5,
+            font=dict(size=12),
+            height=400
+        )
+        st.plotly_chart(fig_box, use_container_width=True)
+
+        # Line chart with Shamsi labels + outliers
+        fig_line = px.line(
+            daily_issue,
+            x="ShamsiLabel",
+            y="DailyIssue",
+            markers=True,
+            title="Daily Issue Trend with IQR Outliers (Shamsi Dates)",
+            labels={
+                "ShamsiLabel": "Date (Shamsi)",
+                "DailyIssue": "Daily Issue Volume"
+            }
+        )
+
+        if not outliers.empty:
+            fig_line.add_scatter(
+                x=outliers["ShamsiLabel"],
+                y=outliers["DailyIssue"],
+                mode="markers",
+                name="Outliers",
+                marker=dict(
+                    size=10,
+                    color="red",
+                    symbol="circle-open",
+                    line=dict(width=2)
+                )
+            )
+
+        fig_line.update_layout(
+            template="plotly_white",
+            title_x=0.5,
+            font=dict(size=11),
+            xaxis_tickangle=-60,
+            height=450
+        )
+
+        st.plotly_chart(fig_line, use_container_width=True)
+
+        with st.expander("Show daily issue data (with outlier flags)"):
+            st.dataframe(daily_issue, use_container_width=True)
 
 
 # ==========================================================
