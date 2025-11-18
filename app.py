@@ -83,7 +83,7 @@ with c2:
 with c3:
     st.metric(
         label="Inventory Turnover (Issue-based)",
-        value=f"{inventory_turnover:.2f}×",
+        value=f"{inventory_turnover:.2f}",
         help="Total issue volume divided by average on-hand inventory."
     )
 
