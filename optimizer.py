@@ -30,8 +30,8 @@ class Config:
     for file in files:
         st.write("- ", file)
     
-    TRANSACTIONS_FILE = os.path.join(cwd, "data/data_transactions.csv")
-    LEAD_TIMES_FILE = os.path.join(cwd, "data/data_lead_times.csv")
+    TRANSACTIONS_FILE = os.path.join(cwd, "data/data_transactions.xlsx")
+    LEAD_TIMES_FILE = os.path.join(cwd, "data/data_lead_times.xlsx")
     
     TRAIN_TEST_SPLIT = 0.8
     RANDOM_SEED = 42
